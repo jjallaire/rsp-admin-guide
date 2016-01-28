@@ -1,0 +1,593 @@
+# R Sessions
+
+## R Executable and Libraries
+
+### Locating R
+
+RStudio Server uses the version of R pointed to by the output of the following command:
+
+```bash
+$ which R
+```
+
+The `which` command performs a search for the R executable using the system PATH. RStudio will therefore by default bind to the same version that is run when R is executed from a terminal.
+
+For versions of R installed by system package managers this will be `/usr/lib/R`. For versions of R installed from source this will typically (but not always) be `/usr/local/lib/R`.
+
+If you want to override which version of R is used then you can use the `rsession-which-r` setting. For example:
+
+*/etc/rstudio/rserver.conf*
+
+```ini
+rsession-which-r=/usr/local/bin/R
+```
+
+Note that this change will not take effect until the server is restarted. 
+
+#### Using Multiple Versions of R
+
+The section above describes how RStudio Server locates the global default version of R. It's also possible to specify alternate versions of R either by user or by group. The [R Versions] section describes this in more detail.
+
+### Locating Shared Libraries
+
+You can add elements to the default `LD_LIBRARY_PATH` for R sessions (as determined by the R `ldpaths` script) by adding an `rsession-ld-library-path` entry to the server config file. This might be useful for ensuring that packages can locate external library dependencies that aren't installed in the system standard library paths. For example:
+
+*/etc/rstudio/rserver.conf*
+
+```ini
+rsession-ld-library-path=/opt/someapp/lib:/opt/anotherapp/lib
+```
+
+Note that this change will not take effect until the server is restarted.
+
+### Customizing Session Launches
+
+#### Profile Script Execution
+
+RStudio Server launches R sessions under a bash login shell. This means that prior to the execution of the R session the bash shell will read and execute commands  from this file if it exists:
+
+```bash
+/etc/profile
+```
+
+After reading that file, it looks for the following files and reads and executes commands from the *first* one that exists and is readable (it's important to note that only one of these files will be read and executed):
+
+```bash
+~/.bash_profile
+~/.bash_login
+~/.profile
+```
+
+If you have further RStudio specific initialization logic (exporting environment variables, etc.) you can optionally create an R session specific profile script at:
+
+```bash
+/etc/rstudio/rsession-profile
+```
+
+If it exists this script will be executed prior to the bash shell that launches the R session. 
+
+#### Environment Variables
+
+R sessions inherit environment variables that are explicitly exported from the  profile scripts described above. It's also possible to append paths to the `LD_LIBRARY_PATH` environment variable using the `rsession-ld-library-path` option (see previous section for details).
+
+Another source of environment variables are PAM sessions. On Debian/Ubuntu systems, the default PAM profile run by RStudio Server includes the environment variables defined in `/etc/security/pam_env.conf` and `/etc/environment`. To learn more about setting environment variables with PAM you should consult the [PAM Sessions] section as well as the documentation on the `pam_env` module here: [http://linux.die.net/man/8/pam_env](http://linux.die.net/man/8/pam_env).
+
+#### Program Supervisors
+
+You may also wish to run R sessions under a program supervisor that modifies their environment or available resources. You can specify a supervisor (and the arguments which control it's behavior) using the `rsession-exec-command` setting. For example:
+
+*/etc/rstudio/rserver.conf*
+
+```ini
+rsession-exec-command=nice -n 10
+```
+
+This example uses the `nice` command to run all R sessions with a lower scheduling priority. See [http://linux.die.net/man/1/nice](http://linux.die.net/man/1/nice) for more details on `nice`. Note that for `nice` in particular it's possible to accomplish the same thing using user and group profiles (and even specify a custom priority level per user or group). See the [User and Group Profiles] section for more details.
+
+## User and Group Profiles
+
+User and Group Profiles enable you to tailor the behavior of R sessions on a per-user or per-group basis. The following attributes of a session can be configured within a profile:
+
+1) Version of R used
+2) CPU affinity (i.e. which set of cores the session should be bound to)
+3) Scheduling priority (i.e. nice value)
+4) Resource limits (maximum memory, processes, open files, etc.)
+
+### Creating Profiles
+
+Profiles are defined within the file `/etc/rstudio/profiles`. Note that this file is not created by default so you'll need to create it if doesn't already exist. Profiles are divided into sections of three different type:
+
+1) Global (`[*]`)
+
+2) Per-group (`[@groupname]`)
+
+3) Per-user (`[username]`)
+
+Here's an example profiles file that illustrates each of these types:
+
+*/etc/rstudio/profiles*
+
+```ini
+[*]
+cpu-affinity = 1-4
+max-processes = 100
+max-memory-mb = 2048
+
+[@powerusers]
+cpu-affinity = 5-16
+nice = -10
+max-memory-mb = 4096
+
+[jsmith]
+r-version = /opt/R/3.1.0
+```
+
+This configuration specifies that by default users will run on cores 1 to 4 with a limit of 100 processes and 2GB of virtual memory. It also specifies that members of the `powerusers` group will run on cores 5 to 16 with an elevated nice priority and a limit of 4GB of memory. Finally, the user `jsmith` is configured to use a different version of R from the system default. 
+
+Note that the `/etc/rstudio/profiles` file is processed from top to bottom (i.e. settings matching the current user that occur later in the file always override ones that appeared prior). The settings available within `/etc/rstudio/profiles` are described in more depth below.
+
+
+### CPU Affinity and Scheduling Priority
+
+If you have users or groups that consistently require more compute resources than others you can use profile settings to reserve CPUs (`cpu-affinity`) as well as raise overall scheduling priority (`nice`).
+
+#### CPU Affinity
+
+The `cpu-affinity` setting specifies which cores on a multi-core system should be used to schedule work for a session. This is specified as a comma-separated list of core numbers (1-based) where both individual cores and ranges of cores can be specified. For example:
+
+```ini
+cpu-affinity = 1,2,3,4
+cpu-affinity = 1-4
+cpu-affinity = 1,2,15-16
+```
+
+To determine the number of addressable cores on your system you can use the `nproc` command:
+
+```bash
+$ nproc
+```
+
+#### Scheduling Priority
+
+The `nice` setting specifies a relative priority for scheduling session CPU time. Negative 20 is the highest nice priority and positive 20 is the lowest priority. The system default niceness for processes is typically 0. The following are all valid nice values:
+
+```ini
+nice = -10
+nice = 0
+nice = 15
+```
+
+Scheduler behavior around nice priorities varies by system. For more details see [nice use and effect](http://en.wikipedia.org/wiki/Nice_(Unix)#Use_and_effect).
+
+### Resource Limits
+
+Profiles can also be used to specify limits on available memory as well as the maximum number of processes and open files.
+
+#### Available Memory
+
+The `max-memory-mb` setting controls the maximum amount of addressable memory for R sessions (by default memory is unlimited). This example specifies a limit of 2GB:
+
+```ini
+max-memory-mb = 2048
+```
+
+Note that this value sets the amount of virtual memory that can be used by a process. Virtual memory includes code (i.e. shared libraries) loaded by the process as well as things like memory mapped files, so can often consume several hundred megabytes even for a vanilla R session. Therefore, you want to be sure not to set this threshold too low (in no case should you set it below 1024).
+
+#### Number of Processes
+
+The `max-processes` settings controls the maximum number of processes createable by a user. This setting is useful to prevent either inadvertent or malicious [fork bombs](http://en.wikipedia.org/wiki/Fork_bomb). The following example sets a limit of 200 processes:
+
+```ini
+max-processes = 200
+```
+
+#### Number of Open Files
+
+In most Linux environments there is a maximum of 1024 open files per process. This is typically more than enough, but if you have a particular applications that requires more open files the `max-open-files` setting can be used to increase the limit. For example:
+
+```ini
+max-open-files = 2048
+```
+
+### Using Multiple Versions of R
+
+As illustrated above, you can bind users or groups to distinct versions of R installed on your server. This is controlled by the `r-version` option. Here are several examples of it's use:
+
+```ini
+r-version = /usr/lib/R
+r-version = /usr/local/lib/R
+r-version = /opt/R/3.1.0
+r-version = /opt/R/3.2.0
+```
+
+Note that `r-version` specifies the full path to the directory where R is installed.
+
+See the [R Versions] chapter for additional details on running multiple versions of R on a single server.
+
+## Multiple R Sessions
+
+RStudio Server Professional enables users to have multiple concurrent R sessions on a single server or load balanced cluster of servers (the open-source version of RStudio Server supports only a single session at a time).
+
+### Creating New Sessions
+
+You can start a new R Session using the **New Session** command from the **Session** menu (or the corresponding toolbar button near the top-right of the IDE). 
+
+You can also open an existing RStudio project in a new R session by using the **Open Project in New Session** command. When switching projects there is also a button on the right side of the projects menu that lets you specify that the project should be opened in a new session rather than within the current one.
+
+You can review all currently running sessions and switch between them using the **Sessions** toolbar near the top-right of the IDE.
+
+### Session Lifetimes
+
+R Sessions are long-running tasks that continue to be available until you explicitly quit them (you can think of them as you'd think of multiple top-level RStudio windows running on the desktop). This means that you can kickoff a long running job in one session and then switch to another session, revisiting the original session later to check on it's progress. As is also possible on the desktop, you can navigate between different projects and working directories within a session. 
+
+Sessions will suspend automatically when they are idle and then be automatically resumed next time they are accessed. To permanently quit a session you can use the **Quit Session** command located on the **File** menu or the corresponding toolbar button at the top right of the IDE.
+
+### Disabling Multiple Sessions
+
+If you wish disable support for multiple sessions you can use the `server-multiple-sessions` option. For example:
+
+*/etc/rstudio/rserver.conf*
+
+```ini
+server-multiple-sessions=0
+```
+
+
+## Kerberos
+
+You can use PAM sessions to arrange for [Kerberos](https://en.wikipedia.org/wiki/Kerberos_\(protocol\)) tickets to be made available for use by R sessions. This is accomplished using the [pam_krb5](http://www.eyrie.org/~eagle/software/pam-krb5/pam-krb5.html) PAM module. Note that you may need to install this module separately depending on which Linux distribution/version you are running.
+
+### Configuration
+
+**NOTE**: You should be sure to understand the previous section on [PAM Sessions] before attempting to modify your configuration to support Kerberos.
+
+The following are simple examples of the `pam_krb5` configuration directives you would need to add to your RStudio PAM configuration files. Note that `pam_krb5` supports a large number of options, some of which may be required to get Kerberos working correctly in your environment. You should consult the [pam_krb5 documentation](http://www.eyrie.org/~eagle/software/pam-krb5/pam-krb5.html) before proceeding to ensure you've specified all options correctly.
+
+The main PAM profile for RStudio should be modified to include the following `pam_krb5` directives:
+
+*/etc/pam.d/rstudio*
+
+```ini
+auth       sufficient     pam_krb5.so debug
+account    required       pam_krb5.so debug
+session    requisite      pam_krb5.so debug
+```
+
+In addition to modifying the main PAM profile, you will also need to create a custom PAM session profile for RStudio (as described in [Creating a Custom Profile]). This needs to include the appropriate `pam_krb5` directives based on your local Kerberos configuration. For example:
+
+*/etc/pam.d/rstudio-session*
+
+```ini
+auth        required      pam_krb5.so debug
+account     [default=bad success=ok user_unknown=ignore] pam_krb5.so debug
+password    sufficient    pam_krb5.so use_authtok debug
+session     requisite     pam_krb5.so debug
+```
+
+Note that typically when you create a custom PAM session profile you include the `auth sufficient pam_rootok.so` directive. However, in the case of configuring for Kerberos authentication you do not want this directive, rather you need to specify that authentication is done by Kerberos using an explicit password as illustrated in the above example.
+
+To ensure that the custom PAM session profile is used by RStudio Server and that PAM passwords are correctly forwarded to `pam_krb5` you'll also need to add the following entries to the `rserver.conf` config file:
+
+*/etc/rstudio/rserver.conf*
+
+```ini
+auth-pam-sessions-profile=rstudio-session 
+auth-pam-sessions-use-password=1
+```
+
+Some additional notes regarding configuration:
+
+- The `debug` action in the PAM profiles is not required however we recommend adding it as it makes troubleshooting much more straightforward.
+
+- The examples above are not *complete* examples of the contents of the PAM profiles but rather illustrations of the `pam_krb5` entries that need to be present. Your local environment may have many additional entries which you should ensure are also included as necessary.
+
+You should be sure to suspend active R sessions and to restart RStudio Server after making configuration changes to ensure that the new settings are being used. You can do this as follows:
+
+```bash
+sudo rstudio-server force-suspend-all
+sudo rstudio-server restart
+```
+
+### Testing and Troubleshooting
+
+After making the required configuration changes you should test your updated PAM configuration in isolation from RStudio Server using the `pamtester` utility as described in [Diagnosing PAM Authentication Problems]. The following command will test both authentication as well as issuing of Kerberos tickets:
+
+```bash
+sudo /usr/lib/rstudio-server/bin/pamtester --verbose \
+  rstudio-session <user> authenticate setcred open_session
+```
+
+Note that you should substitute an actual local username for the `<user>` part of the command line.
+
+The specifics of both PAM configuration and Kerberos configuration can vary substantially by environment. As a result correct configuration likely requires additional entries and options which this guide isn't able to cover. Please refer to the documentation linked to in [PAM Resources] as well as the [pam_krb5](http://www.eyrie.org/~eagle/software/pam-krb5/pam-krb5.html) for additional details.
+
+
+## Workspace Management
+
+### Default Save Action
+
+When a user exits an R session they need to choose whether to save their R workspace (i.e. `.RData` file). RStudio has global and per-project settings that control what happens when a workspace has unsaved changes. Possible values are:
+
+- `ask` -- Ask whether to save the workspace file
+- `yes` -- Always save the workspace file
+- `no`  -- Never save the workspace file
+
+The default global setting is `ask` and the default project-level setting is derived from the current global setting (these options can be modified by end users via the *Global Options* and *Project Options* dialogs respectively).
+
+The default global setting can also be changed via the `session-save-action-default` configuration parameter in the `rsession.conf` config file. For example, to change the default value to `no` you would use this:
+
+*/etc/rstudio/rsession.conf*
+
+```ini
+session-save-action-default=no
+```
+
+Note that this setting is specified in the `rsession.conf` config file and takes effect the next time a user launches an R session (rather than requiring a full restart of the server).
+
+### Suspend and Resume
+
+When R sessions have been idle (no processing or user interaction) for a specified period of time (2 hours by default) RStudio Server suspends them to disk to free up server resources. When the user next interacts with their session it is restored from disk and the user resumes right back where they left off. This is all done seamlessly such that users aren't typically aware that a suspend and resume has occurred.
+
+#### Session Timeout
+
+To configure the amount of idle time to wait before suspending sessions you can use the `session-timeout-minutes` setting in the `/etc/rstudio/rsession.conf` file. For example:
+
+*/etc/rstudio/rsession.conf*
+
+```ini
+session-timeout-minutes=30
+```
+
+*Important note*: this setting and a few others discussed in this section are specified in the `/etc/rstudio/rsession.conf` file (rather than the `rserver.conf` file previously referenced).
+
+There are some conditions where an R session will not be suspended, these include:
+
+1) When a top-level R computation is running
+2) When the R prompt is not in it's default state (e.g. during a debugging session)
+
+You can also specify that R sessions should never be suspended by setting the `session-timeout-minutes` to zero. For example:
+
+*/etc/rstudio/rsession.conf*
+
+```ini
+session-timeout-minutes=0
+```
+
+Note that session timeout settings take effect the next time a user launches an R session (rather than requiring a full restart of the server).
+
+#### Forcing Suspends
+
+You can force the suspend of individual sessions or even all sessions on the server. You can do this directly from the main page of the [Administrative Dashboard] or from the system shell as follows: 
+
+```bash
+$ sudo rstudio-server force-suspend-session <pid>
+$ sudo rstudio-server force-suspend-all
+```
+
+#### Resume and .Rprofile
+
+By default the `Rprofile.site` and `.Rprofile` files are not re-run when a session is resumed (it's presumed that all of their side-effects are accounted for by simply restoring loaded packages, options, environment variables, etc.). 
+
+In some configurations it might be desirable to force the re-execution of profile files. There is an end user option that controls this on the *General* options pane which defaults to false. However, server administrators may wish to ensure that this option defaults to true. To do this you use the `session-rprofile-on-resume-default` option. For example:
+
+
+*/etc/rstudio/rsession.conf*
+
+```ini
+session-rprofile-on-resume-default=1
+```
+
+Note that this setting is specified in the `rsession.conf` config file and takes effect the next time a user launches an R session (rather than requiring a full restart of the server).
+
+### Workspace Storage
+
+Storage of workspaces (.RData files) in RStudio Server does not use compression by default. This differs from the behavior of base R. Compression is disabled because we've observed that for larger workspaces (> 50MB) compression can result in much lower performance for session startup and suspend/resume (on the order of 3 or 4 times slower).
+
+The default workspace save options under RStudio Server are as follows:
+
+```r
+options(save.defaults=list(ascii=FALSE, compress=FALSE))
+options(save.image.defaults=list(ascii=FALSE, safe=TRUE, compress=FALSE))
+```
+
+If you wish to use different defaults you can define the `save.defaults` and/or `save.image.defaults` options in your `Rprofile.site` or per-user `.Rprofile` and RStudio Server will respect the settings you specify rather than using it's own defaults.
+
+See <https://stat.ethz.ch/R-manual/R-devel/library/base/html/save.html> for additional details on how R saves objects and the storage and performance implications of using compression.
+
+
+## Project Sharing
+
+### Overview
+
+Project Sharing is a feature of RStudio Server Pro that enables users to work together on RStudio projects. When enabled, a project owner may select any number of other RStudio Server users as project collaborators. RStudio Server manages the permissions of files in the project to ensure that all collaborators can access them, enables multiple collaborators to edit a file simultaneously, and lets collaborators see who else is working inside a project with them.
+
+### Prerequisites
+
+#### Access Control Lists
+
+To use Project Sharing, the directories hosting the projects to be shared must be on a volume that supports POSIX Access Control Lists (ACLs). RStudio Server uses ACLs to grant collaborators access to shared projects; ordinary file permissions are not modified.
+
+Instructions for enabling ACLs vary by Linux distribution and filesystem type (see the [Guide to enabling ACLs on Ubuntu](https://help.ubuntu.com/community/FilePermissionsACLs) or [RedHat](https://access.redhat.com/documentation/en-US/Red_Hat_Enterprise_Linux/6/html/Storage_Administration_Guide/ch-acls.html), for example). Broadly, you will need to ensure that the filesystem is mounted with the `user_xattr` and `acl` attributes, and modify `/etc/fstab` if necessary to persist the attributes.
+
+Note that many Linux distributions now have ACLs enabled by default in which case no special configuration is required. You can use the `tune2fs` command to inspect the attributes with which your filesystem is mounted (`user_xattr` and `acl` are required for project sharing).
+
+#### Project Sharing and NFS
+
+If you plan to use Project Sharing with NFS-mounted volumes, there are several caveats you should be aware of.
+
+1. We recommend using NFSv3 instead of NFSv4, since NFSv4 has its own ACL model which (despite being richer) doesn't inter-operate well with POSIX ACLs. For more information, see [ACL Interoperability with NFS](http://wiki.linux-nfs.org/wiki/index.php/ACLs). 
+
+2. We recommend mounting NFS with the `noac` mount option. Without this option, NFS caches file attributes, so it may not be possible for users working simultaneously in a project to know whether they're seeing each others' latest changes. The `noac` option does reduce performance, however, so we recommend testing to choose the right trade off for your environment.
+
+3. Some features which automatically update when directory contents change will not update on NFS. For instance, users may need to manually refresh the Files pane to see new files added by collaborators.
+
+#### Shared Storage
+
+To use Project Sharing, a directory must be specified to which all users on the server can read and write. In a single-server installation, RStudio uses this location by default:
+
+    /var/lib/rstudio-server/shared-storage
+
+In a load-balanced configuration, however, RStudio does not provide a default, so it is necessary to provision a path both visible to and writeable by all users on the system (typically on the same filesystem on which home directories are mounted). This path can be supplied to RStudio Server via the `server-shared-storage-path` option, for example:
+
+*/etc/rstudio/rserver.conf*
+
+```ini
+server-shared-storage-path=/shared/rstudio-server/shared-storage
+```
+
+The `server-shared-storage-path` option (described above) configures the path used for shared project storage. Note that this storage contains only *links* to shared projects, not the projects themselves, so requires a very small amount of physical storage. 
+
+### Disabling Project Sharing
+
+Project Sharing is enabled by default however you can disable it using the `server-project-sharing` option, for example:
+
+*/etc/rstudio/rserver.conf*
+
+```ini
+server-project-sharing=0
+```
+
+## Package Installation
+
+You can customize the location of user packages installed from CRAN as well as the default CRAN repository. You can also configure the user-interface of the RStudio IDE to discourage end-user package installation in the case where packages are deployed centrally to a site library.
+
+*Important note:* The settings discusseded in this section are specified in the `/etc/rstudio/rsession.conf` file (rather than the `rserver.conf` file previously referenced).
+ 
+### User Library 
+
+By default R packages are installed into a user-specific library based on the contents of the `R_LIBS_USER` environment variable (more details on this mechanism are here: [http://stat.ethz.ch/R-manual/R-devel/library/base/html/libPaths.html](http://stat.ethz.ch/R-manual/R-devel/library/base/html/libPaths.html)).
+
+It's also possible to configure an alternative default for user package installation using the `r-libs-user` setting. For example:
+
+*/etc/rstudio/rsession.conf*
+
+```ini
+r-libs-user=~/R/library
+```
+
+One benefit of establishing an alternative default user library path is that by doing this you can remove the R version component of the package library path (which the default path contains). This makes it possible to upgrade the major version of R on the server and have user's packages continue to work.
+
+### Discouraging User Installations
+
+It may be that you've configured RStudio Server with a site package library that is shared by all users. In this case you might wish to discourage users from installing their own packages by removing the package installation UI from the RStudio IDE. To do this you use the `allow-package-installation` setting. For example:
+
+*/etc/rstudio/rsession.conf*
+
+```ini
+allow-package-installation=0
+```
+
+Note that this setting merely discourages package installation by removing user-interface elements. It's still possible for users to install packages directly using the `utils::install.packages` function.
+
+### CRAN Repositories
+
+RStudio Server uses the RStudio CRAN mirror ([https://cran.rstudio.com](https://cran.rstudio.com)) by default. This mirror is globally distributed using Amazon S3 storage so should provide good performance for all locales. You may however wish to override the default CRAN mirror. This can be done with the `r-cran-repos` settings. For example:
+
+*/etc/rstudio/rsession.conf*
+
+```ini
+r-cran-repos=http://cran.at.r-project.org/
+```
+
+Whatever the default CRAN mirror is, individual users are still able to set their own default. To discourage this, you can set the `allow-r-cran-repos-edit` settings. For example:
+
+*/etc/rstudio/rsession.conf*
+
+```ini
+allow-r-cran-repos-edit=0
+```
+
+Note that even with user editing turned off it's still possible for users to install packages from alternative repositories by directly specifying the `repos` parameter in a call to `install.packages`.
+
+## Feature Limits
+
+RStudio Server has a number of other limits that can be configured. This section describes these limits. Note that these settings are specified in the `/etc/rstudio/rsession.conf` file (rather than the `rserver.conf` file previously referenced).
+
+### Disabling Access to Features
+
+Besides the limits on package installation and CRAN repository editing described in the previous section there are a number of other limits that can be specified. The following describes all of the options that can be used to limit features.
+
+*/etc/rstudio/rsession.conf*
+
+`allow-vcs`
+
+:    Allow access to Git and SVN version control features.
+
+`allow-vcs-executable-edit`
+
+:    Allow editing of the underlying Git or SVN executable.
+
+`allow-package-installation`
+
+:    Allow installation of packages using the Packages Pane (note that even if this is set to 0 it's still possible to install packages using `utils::install.packages` from the command line).
+
+`allow-r-cran-repos-edit`
+
+:    Allow editing of the CRAN repository used for package downloads (note that it's still possible to specify an alternate repository using the `repos` parameter of `utils::install.packages`).
+
+`allow-shell`
+
+:    Allow access to the Tolls -> Shell dialog (note that it's still possible to execute shell commands using the `system` function).
+
+`allow-file-downloads`
+
+:    Allow downloading files using the Export command in the Files Pane.
+
+`allow-external-publish`
+
+:    Allow content to be published to external (cloud) services. This includes publishing HTML documents created with R Markdown or R Presentations to RPubs (http://rpubs.com), and publishing Shiny applications and documents to ShinyApps.io (http://shinyapps.io).  Note that this just removes the relevant user interface elements in the IDE, and that it may still be possible for users to publish content using the R console.
+
+`allow-publish`
+
+:    Allow content to be published. If specified, this option removes all user interface elements related to publishing content from the IDE, and overrides `allow-external-publish`. 
+
+All of these features are enabled by default. Specify `0` to disable access to the feature.
+
+Note that these options should be specified in the `/etc/rstudio/rsession.conf` configuration file (rather than the main rserver.conf configuration file).
+
+### Maximum File Upload Size
+
+You can limit the maximum size of a file upload by using the `limit-file-upload-size-mb` setting. For example, the following limits file uploads to 100MB:
+
+*/etc/rstudio/rsession.conf*
+
+```ini
+limit-file-upload-size-mb=100
+```
+
+The default behavior is no limit on the size of file uploads.
+
+### CPU Time per Computation
+
+If you want to prevent runaway computations that consume 100% of the CPU you can set the maximum number of minutes to allow top-level R computations to run for using the `limit-cpu-time-minutes` setting. For example:
+
+*/etc/rstudio/rsession.conf*
+
+```ini
+limit-cpu-time-minutes=30
+```
+
+This specifies that no top level computation entered at the R console should run for more than 30 minutes. This constraint is implemented by calling the R `setTimeLimit` function immediately prior to handing off console commands to R. As a result it is possible for a particular script to override this behavior if it knows that it may exceed the threshold. This would be done as follows:
+
+```r
+setTimeLimit(cpu = Inf)
+# Long running R code here...
+```
+
+### XFS Disk Quotas
+
+If your system uses the XFS file system ([http://en.wikipedia.org/wiki/XFS](http://en.wikipedia.org/wiki/XFS)) then RStudio Server can be configured to notify users when they come close to or exceed their disk quota. You can enable this using the `limit-xfs-disk-quota` setting. For example:
+
+*/etc/rstudio/rsession.conf*
+
+```ini
+limit-xfs-disk-quota=1
+```
+
+The user's XFS disk quota will be checked when the RStudio IDE loads and a warning message will be displayed if they are near to or over their quota.
+
+
+
+
+
+
