@@ -1,0 +1,305 @@
+# Access and Security
+
+## Network Port and Address
+
+After initial installation RStudio accepts connections on port 8787. If you wish to listen on a different another port you can modify the `www-port` option. For example:
+
+*/etc/rstudio/rserver.conf*
+
+```ini
+www-port=80
+```
+
+By default RStudio binds to address 0.0.0.0 (accepting connections from any remote IP). You can modify this behavior using the `www-address` option. For example:
+
+*/etc/rstudio/rserver.conf*
+
+```ini
+www-address=127.0.0.1
+```
+
+Note that changes to the configuration will not take effect until the server is restarted. 
+
+## IP Access Rules
+
+RStudio Server can be configured to deny access to specific IP addresses or ranges of addresses.  Access rules are defined in the configuration file `/etc/rstudio/ip-rules` 
+
+Access rules are established using the `allow` and `deny` directives and are processed in order, with the first matching rule governing whether a given address is allowed or denied. For example, to allow only clients within the `192.168.1.0/24` subnet but also deny access to `192.168.1.10` you would use these rules:
+
+*/etc/rstudio/ip-rules*
+
+```ini
+deny    192.168.1.10
+allow   192.168.1.0/24
+deny    all
+```
+
+All clients outside of the specified subset are denied access because of the `deny all` rule at the end of the configuration.
+
+Note that changes to the configuration will not take effect until the server is restarted. 
+
+
+## Secure Sockets (SSL)
+
+### SSL Configuration
+
+If your RStudio Server is running on a public network then configuring it to use SSL (Secure Sockets Layer) encryption is strongly recommended. You can do this via the `ssl-enabled` setting along with related settings that specify the location of your SSL certificate and key. For example:
+
+*/etc/rstudio/rserver.conf*
+
+```ini
+ssl-enabled=1
+ssl-certificate=/var/certs/your_domain_name.crt
+ssl-certificate-key=/var/certs/your_domain_name.key  
+```
+
+It's important when installing the certificate (.crt) file that you concatenate together any intermediate certificates (i.e. the generic one from your certificate authority) with the certificate associated with your domain name. For example you could use a shell command of this form to concatenate the CA intermediate certificate to your domain name's certificate:
+
+```bash
+$ cat certificate-authority.crt >> your_domain_name.crt
+```
+
+The resulting file should then be specified in the `ssl-certificate` option.
+
+It's also important to ensure that the file permissions on your SSL certificate key are as restrictive as possible so it can't be read by ordinary users. The file should typically be owned by the `root` user and be set as owner readable and writeable. For example:
+
+```bash
+$ sudo chmod 600 /var/certs/your_domain_name.key 
+```
+
+### SSL Protocols
+
+By default RStudio Server supports the TLSv1, TLSv1.1, and TLSv1.2 protocols for SSL. The list of supported protocols can configured via the `ssl-protocols` option. For example, to use only the TLSv1.1 and TLSv1.2 protocols you would use:
+
+*/etc/rstudio/rserver.conf*
+
+```bash
+ssl-protocols=TLSv1.1 TLSv1.2
+```
+
+The list of supported protocols is space delimted (as illustrated above). Valid protocol values are: `SSLv2`, `SSLv3`, `TLSv1`, `TLSv1.1`, and `TLSv1.2`.
+
+### SSL Ports
+
+When RStudio Server is configured to use SSL the default behavior with respect to ports is:
+
+1) SSL is bound to port 443 (enabling access using the standard https protocol within the browser)
+2) The server also listens on port 80 and redirects all requests to port 443 (allowing users to specify the domain without the https protocol and be automatically redirected to the secure port)
+
+However, if SSL is bound to another port (using the `www-port` option) then the automatic redirect behavior is not enabled. It's also possible to disable automatic SSL redirects entirely using the `ssl-redirect-http` option as follows:
+
+*/etc/rstudio/rserver.conf*
+
+```ini
+ssl-redirect-http=0
+```
+
+Note that changes to the configuration will not take effect until the server is restarted. 
+
+## Server Permissions 
+
+### Server Account
+
+RStudio Server runs as the system root user during startup and then drops this privilege and runs as a more restricted user. RStudio Server then re-assumes root privilege for a brief instant when creating R sessions on behalf of users (the server needs to call `setresuid` when creating the R session, and this call requires root privilege). 
+
+The user account that RStudio Server runs under in the normal course of operations is `rstudio-server`. This account is automatically added to the system during installation and is created as a system rather than end user account (i.e. the `--system` flag is passed to `useradd`).
+
+### AppArmor
+
+On Debian and Ubuntu systems the RStudio Server process runs under an AppArmor profile (you can find more information about AppArmor here: [http://en.wikipedia.org/wiki/AppArmor](http://en.wikipedia.org/wiki/AppArmor)).
+
+If AppArmor is causing problems in your configuration you can disable it using the `server-app-armor-enabled` option. For example:
+
+*/etc/rstudio/rserver.conf*
+
+```ini
+server-app-armor-enabled=0
+```
+
+Note that there aren't known scenarios where the RStudio Server AppArmor profile causes problems so it's unlikely that you'll ever need to modify this setting. Note also that this setting will not take effect until the server is restarted.
+
+
+## Running with a Proxy
+
+### Overview
+
+If you are running RStudio Server behind a proxy server you need be sure to configure the proxy server so that it correctly handles all traffic to and from RStudio Server. Beyond the normal reverse proxy configuration you'd apply for any HTTP server application, you also need to to ensure that websockets are forwarded correctly between the proxy server and RStudio Server so that Shiny applications run from within the IDE work properly. This section describes how to correctly configure a reverse proxy with [Nginx](http://nginx.org/en/) and [Apache](http://httpd.apache.org/).
+
+### Nginx Configuration
+
+On Debian or Ubuntu a version of Nginx that supports reverse-proxying can be installed using the following command:
+
+```bash
+sudo apt-get install nginx
+```
+
+On CentOS or Red Hat you can install Nginx using the following command:
+
+```bash
+sudo yum install nginx
+```
+
+To enable an instance of Nginx running on the same server to act as a front-end proxy to RStudio Server you would add commands like the following to your `nginx.conf` file. Note that you must add code to proxy websockets in order to correctly display Shiny apps and R Markdown Shiny documents in RStudio Server. Also note that if you are proxying to a server on a different machine you need to replace references to `localhost` with the correct address of the server where you are hosting RStudio.
+
+```r
+http {
+
+  map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+  }
+  
+  server {
+    listen 80;
+    
+    
+    location / {
+      proxy_pass http://localhost:8787;
+      proxy_redirect http://localhost:8787/ $scheme://$host/;
+      proxy_http_version 1.1;
+      proxy_set_header Upgrade $http_upgrade;
+      proxy_set_header Connection $connection_upgrade;
+      proxy_read_timeout 20d;
+    }
+  }
+}
+```
+
+If you want to serve RStudio Server from a custom path (e.g. /rstudio) you would edit your `nginx.conf` file as shown below:
+
+```r
+http {
+
+  map $http_upgrade $connection_upgrade {
+    default upgrade;
+    ''      close;
+  }
+  
+  server {
+    listen 80;
+    
+    location /rstudio/ {
+      rewrite ^/rstudio/(.*)$ /$1 break;
+      proxy_pass http://localhost:8787;
+      proxy_redirect http://localhost:8787/ $scheme://$host/rstudio/;
+      proxy_http_version 1.1;
+      proxy_set_header Upgrade $http_upgrade;
+      proxy_set_header Connection $connection_upgrade;
+      proxy_read_timeout 20d;
+    }
+```
+
+After adding these entries you'll then need to restart Nginx so that the proxy settings take effect:
+
+```bash
+sudo /etc/init.d/nginx restart
+```
+
+### Apache Configuration
+
+To enable an instance of Apache running on the same server to act as a front-end proxy to RStudio Server you need to use the `mod_proxy` and `mod_proxy_wstunnel` modules. The steps for enabling this module vary across operating systems so you should consult your distribution's Apache documentation for details.
+
+On Debian and Ubuntu systems Apache can be installed with `mod_proxy` using the following commands:
+
+```bash
+sudo apt-get install apache2
+sudo apt-get install libapache2-mod-proxy-html
+sudo apt-get install libxml2-dev
+```
+
+Then, to update the Apache configuration files to activate `mod_proxy` you execute the following commands:
+
+```bash
+sudo a2enmod proxy
+sudo a2enmod proxy_http
+sudo a2enmod proxy_wstunnel
+```
+
+On CentOS and RedHat systems Apache can be installed with `mod_proxy` and `mod_proxy_wstunnel` by following the instructions here:
+
+<http://httpd.apache.org/docs/2.4/platform/rpm.html>
+
+By default with Apache 2.4, `mod_proxy` and `mod_proxy_wstunnel` should be enabled. You can check this by opening the file `/etc/httpd/conf.modules.d/00-proxy.conf` and making sure the following lines are included and not commented out:
+
+```apache
+LoadModule proxy_module modules/mod_proxy.so
+LoadModule proxy_wstunnel_module modules/mod_proxy_wstunnel.so
+```
+
+Once you have enabled `mod_proxy` and `mod_proxy_wstunnel` in your Apache installation you need to add the required proxy commands to your `VirtualHost` definition. Note that you will also need to include code to correctly proxy websockets in order to correctly proxy Shiny apps and R Markdown documents within RStudio Server. Also note that if you are proxying to a server on a different machine you need to replace references to `localhost` with the correct address of the server where you are hosting RStudio.
+
+```apache
+<VirtualHost *:80>
+
+  <Proxy *>
+    Allow from localhost
+  </Proxy>
+
+  ProxyPassMatch ^/p/([0-9]+)/(websocket|.*/websocket)/$ ws://localhost:8787/p/$1/$2/
+  ProxyPass / http://localhost:8787/
+  ProxyPassReverse / http://localhost:8787/
+  ProxyRequests Off
+
+</VirtualHost>
+```
+
+Note that if you want to serve RStudio from a custom path (e.g. /rstudio) you would replace the ProxyPass directives described above to:
+
+```apache
+ProxyPassMatch ^/rstudio/p/([0-9]+)/(websocket|.*/websocket)/$ ws://localhost:8787/p/$1/$2/
+ProxyPass /rstudio/ http://localhost:8787/
+ProxyPassReverse /rstudio/ http://localhost:8787/
+ProxyRequests Off
+```
+
+Finally, after you've completed all of the above steps you'll then need to restart Apache so that the proxy settings take effect:
+
+```bash
+sudo /etc/init.d/apache2 restart
+```
+
+### RStudio Configuration
+
+If your RStudio Server and proxy server are running on the same machine you can also change the port RStudio Server listens on from 0.0.0.0 (all remote clients) to 127.0.0.1 (only the localhost). This ensures that the only way to connect to RStudio Server is through the proxy server. You can do this by adding the `www-address` entry to the **`/etc/rstudio/rserver.conf`** file as follows:
+
+```ini
+www-address=127.0.0.1
+```
+
+Note that you may need to create this config file if it doesn't already
+exist.
+
+## SPDY
+
+### Overview
+
+RStudio Server Pro provides experimental support for the [SPDY](http://en.wikipedia.org/wiki/SPDY) network protocol ([draft 3.1](http://www.chromium.org/spdy/spdy-protocol/spdy-protocol-draft3-1) of the protocol is implemented). The implementation uses the SPDY module provided by [nginx 1.8](http://nginx.org/en/docs/http/ngx_http_spdy_module.html).
+
+Note that SPDY is not supported on RedHat/CentOS 5 or SUSE 11, however is supported on RedHat/CentOS 6 and 7 as well as Ubuntu and Debian systems.
+
+### Configuration
+
+Using SPDY requires that you also use SSL. See the section on [Secure Sockets (SSL)] for additional information on configuring SSL.
+
+You can enable SPDY via the `spdy-enabled` setting along with related settings that configure various aspects of SPDY behavior. For example:
+
+*/etc/rstudio/rserver.conf*
+
+```ini
+ssl-enabled=1
+ssl-certificate=/var/certs/your_domain_name.crt
+ssl-certificate-key=/var/certs/your_domain_name.key
+spdy-enabled=1
+spdy-headers-comp=0
+spdy-chunk-size-kb=8
+```
+
+The `spdy-headers-comp` parameter sets the header compression level of a response in a range from 1 (fastest, less compression) to 9 (slowest, best compression). The special value 0 turns off the header compression. The default is 0 (disabled).
+
+The `spdy-chunk-size-kb` parameter sets the maximum size of chunks into which the response body is [sliced](http://www.chromium.org/spdy/spdy-protocol/spdy-protocol-draft2#TOC-Data-frames). A too low value results in higher overhead. A too high value impairs prioritization due to [HOL blocking](http://en.wikipedia.org/wiki/Head-of-line_blocking). The default is 8k.
+
+
+
+
+
+
