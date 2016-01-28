@@ -151,7 +151,6 @@ Once you've created a project you go to the *Credentials* area of *APIs and auth
 
 ![Create Client Id](images/CreateClientID.png)
 
-\newpage
 
 You'll then be presented with a dialog used to create a new client ID:
 
