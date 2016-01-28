@@ -2,3 +2,6 @@
 .Rhistory
 .RData
 .DS_Store
+*.html
+libs/
+search_index.json
