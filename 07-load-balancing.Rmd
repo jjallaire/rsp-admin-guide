@@ -1,0 +1,316 @@
+# Load Balancing
+
+## Overview
+
+RStudio Server can be configured to load balance R sessions across two or more nodes within a cluster. This provides both increased capacity as well as higher availability.
+
+Note that load balancing for RStudio Server has some particular "stickiness" requirements stemming from the fact that users must always return to the same R session where their work resides (i.e. their traffic can't be handled by more than one node). As a result, it's not enough to simply place multiple RStudio Servers behind a conventional hardware or software load balancer---additional intelligence and routing is required.
+
+Key characteristics of the RStudio Server load balancer include:
+
+1. Multiple masters for high availability---all nodes can balance traffic to all other nodes.
+
+2. Support for several load balancing strategies including least busy server (by active sessions or system load), even distribution by user, or a custom strategy based on an external script.
+
+3. The ability to add and remove nodes while the cluster is running.
+
+4. Works standalone or can be integrated with other front-end load balancing environments.
+
+## Configuration
+
+### Requirements
+
+There are several requirements for nodes within RStudio clusters:
+
+1. All nodes must run the same version of RStudio Server Pro.
+
+2. Server configurations (i.e. contents of the `/etc/rstudio` directory) must be identical.
+
+3. User accounts must be accessible from each node and usernames and user ids must be identical on all nodes.
+
+4. The clocks on all nodes must be synchronized.
+
+5. User home directories must be accessible via **shared storage** (e.g.
+   all nodes mounting the same NFS volume).
+   
+6. To use the [Project Sharing] feature in a load balanced configuration an explicit server-wide shared storage path also must be defined. See the [Shared Storage] section for additional details. 
+
+7. To use the [Project Sharing] feature with an NFS volume, the NFS volume must be mounted using NFSv2 or NFSv3 with POSIX ACL support. NFSv4 is not recommended because it is not generally compatible with POSIX ACLs.
+
+### Defining Nodes
+
+To define a cluster node, two configuration files need to be provided:
+
+```bash
+/etc/rstudio/load-balancer
+/etc/rstudio/secure-cookie-key
+```
+
+The first of these defines the available nodes and load balancing strategy. The second defines a shared key used for signing cookies (in single node configurations this key is generated automatically, however with multiple nodes explicit coordination is required).
+
+For example, to define a cluster with two nodes that load balances based the number of actively running R sessions you could use the following configuration:
+
+**/etc/rstudio/load-balancer**
+
+```bash
+[config]
+
+balancer = sessions
+
+[nodes]
+
+server1.example.com
+server2.example.com
+```
+
+**/etc/rstudio/secure-cookie-key**
+
+```bash
+a55e5dc0-d6ae-11e3-9334-000c29635f71
+```
+
+The secure cookie key is simply a unique value (in this case a UUID). Note that this file must have user read/write file permissions (i.e. 0600) to protect its contents from other users. You can create a secure cookie key using the `uuid` utility as follows:
+
+```bash
+sudo sh -c "echo `uuid` > /etc/rstudio/secure-cookie-key"
+sudo chmod 0600 /etc/rstudio/secure-cookie-key
+```
+
+In addition, an explicit server-wide shared storage path must be defined (this is used for inter-node synchronization). This path is defined in the `/etc/rstudio/rserver.conf` file. For example:
+
+*/etc/rstudio/rserver.conf*
+
+```ini
+server-shared-storage-path=/shared/rstudio-server/shared-storage
+```
+
+For convenience, this path will often be located on the same volume used for shared home directory storage (e.g. at path `/home/rstudio-server/shared-storage`).
+
+### File Locking
+
+In order to synchronize the creation of sessions across multiple nodes RStudio Server uses a cross-node locking scheme. This scheme relies on the clocks on all nodes being synchronized. RStudio Server includes a `locktester` utility which you can use to verify that file locking is working correctly. To use the `locktester` you should login (e.g. via SSH or telnet) to at least two nodes using the same user account and then invoke the utility from both sessions as follows:
+
+```bash
+$ /usr/lib/rstudio-server/bin/locktester
+```
+
+The first node you execute the utility from should print the following message:
+
+```ini
+*** File Lock Acquired ***
+```
+
+After the message is printed the process will pause so that it can retain the lock (you can cause it to release the lock by interrupting it e.g. via Ctrl+C).
+
+The second and subsequent nodes you execute the utility from should print the following message:
+
+```ini
+Unable to Acquire File Lock
+```
+
+If you interrupt the first node (e.g. via Ctrl+C) the lock will be released and you can then acquire it from the other nodes.
+
+If either of the following occurs then there is an issue with file locking capabilities (or configuration) that should be addressed prior to using load balancing:
+
+1) All nodes successfully acquire the file lock (i.e. more than one node can hold it concurrently).
+2) No nodes are able to acquire the file lock.
+
+If either of the above conditions hold then RStudio won't be able to correctly synchronize the creation of R sessions throughout the cluster (potentially resulting in duplicate sessions and lost data due to sessions overwriting each others state).
+
+
+
+### Managing Nodes
+
+#### Starting Up
+
+After creating your configuration files you should ensure that these files (along with all other configuration defined in `/etc/rstudio`) are copied to all nodes in the cluster. Assuming that the server is already installed and running on each node, you can then apply the load balancing configuration by restarting the server:
+
+```bash
+sudo rstudio-server restart
+```
+
+#### Current Status
+
+Once the cluster is running you can inspect it's state (which sessions are running where) using the load balancing status HTTP endpoint. For example:
+
+```bash
+curl http://localhost/load-balancer/status
+```
+
+Note that the status endpoint is accessed using localhost rather than an external IP address. This is because this endpoint is IP restricted to only be accessible within the cluster, so needs to be accessed directly from one of the nodes.
+
+
+#### Adding and Removing Nodes
+
+To temporarily remove a node from the cluster you can simply stop it:
+
+```bash
+sudo rstudio-server stop
+```
+
+R sessions running on that node will be automatically moved to another active node. To restore the node you can simply start it back up again:
+
+```bash
+sudo rstudio-server start
+```
+
+Note that adding and removing nodes does not require changing the list of defined nodes in `/etc/rstudio/load-balancer` (traffic is automatically routed around nodes not currently running).
+
+
+### Troubleshooting
+
+If users are having difficulty accessing RStudio Server in a load balanced configuration it's likely due to one of the load balancing requirements not being satisfied. This section describes several scenarios where a failure due to unsatisfied requirements might occur.
+
+#### User Accounts Not Synchronized
+
+One of the load balancing requirements is that user accounts must be accessible from each node and usernames and user ids must be identical on all nodes. If a user has the same username but *different* user ids on different nodes then permissions problems will result when the same user attempts to access shared storage using different user-ids.
+
+You can determine the ID for a given username via the `id` command. For example:
+
+```bash
+id -u jsmith
+```
+
+#### NFS Volume Mounting Problems
+
+If NFS volumes containing shared storage are unmounted during an RStudio session that session will become unreachable. Furthermore, unmounting can cause loss or corruption of file locks (see section below). If you are having problems related to accessing user directories then fully resetting the connections between RStudio nodes and NFS will often resolve them. To perform a full reset:
+
+1) Stop RStudio Server on all nodes (`sudo rstudio-server stop`).
+
+2) Fully unmount the NFS volume from all nodes.
+
+3) Remount the NFS volume on all nodes.
+
+4) Restart RStudio Server on all nodes (`sudo rstudio-server start`).
+
+#### File Locking Problems
+
+Shared user storage (e.g. NFS) must support file locking so that RStudio Server can synchronize access to sessions across the various nodes in the cluster. File locking will not work correctly if the clocks on all nodes in the cluster are not synchronized. You can verify that file locking is working correctly by following the instructions in the [File Locking] section above.
+
+## Access and Availablity
+
+Once you've defined a cluster and brought it online you'll need to decide how the cluster should be addressed by end users. There are two distinct approaches to this:
+
+1. **Single Master**. Provide users with the address of one of the nodes. This node will automatically route traffic and sessions as required to the other nodes. This has the benefit of simplicity (no additional software or hardware required) but also results in a single point of failure.
+
+2. **Multiple Masters**. Put the nodes behind some type of system that routes traffic to them (e.g. dynamic DNS or a software or hardware load balancer). While this requires additional configuration it also enables all of nodes to serve as points of failover for each other.
+
+Both of these options are described in detail below. 
+
+### Single Master
+
+In a Single Master configuration, you designate one of the nodes in the cluster as the primary one and provide end users with the address of this node as their point of access. For example:
+
+```bash
+[nodes]
+rstudio.example.com
+rstudio2.example.com
+rstudio3.example.com
+```
+
+Users would access the cluster using **http://rstudio.example.com**. This node would in turn route traffic and sessions both to itself and the other nodes in the cluster in accordance with the active load balancing strategy.
+
+Note that in this configuration the **rstudio2.example.com** and **rstudio3.example.com** nodes can either fail or be removed from the cluster at any time and service will continue to users. However, if the main node fails or is removed then the cluster is effectively down.
+
+
+### Multiple Masters
+
+In a Multiple Masters configuration all of the nodes in the cluster are peers and provide failover for each other. This requires that some external system (dynamic DNS or a load balancer) route traffic to the nodes. In this scenario any of the nodes can fail and service will continue (so long as the external router can respond intelligently to a node being unreachable).
+
+For example, here's an [Nginx](http://wiki.nginx.org/Main) reverse-proxy configuration that you could use with the cluster defined above:
+
+```bash
+http {
+  upstream rstudio-server {
+    server rstudio1.example.com;
+    server rstudio2.example.com backup;
+    server rstudio3.example.com backup;
+  }
+  server {
+    listen 80;
+    location / {
+      proxy_pass http://rstudio-server;
+      proxy_redirect http://rstudio-server/ $scheme://$host/;
+    }
+  }
+}
+```
+
+In this scenario the Nginx software load balancer would be running on **rstudio.example.com** and reverse proxy traffic to **rstudio1.example.com**, **rstudio2.example.com**, etc. Note that one node is designated as primary so traffic is routed there by default. However, if that node fails then Nginx automatically makes use of the backup nodes.
+
+This is merely one example as there are many ways to route traffic to multiple servers---RStudio Server load balancing is designed to be compatible with all of them.
+
+### Using SSL
+
+If you are running an RStudio Server on a public facing network then using SSL encryption is strongly recommended. Without this all user session data is sent in the clear and can be intercepted by malicious parties.
+
+The recommended SSL configuration depends on which access topology you've deployed:
+
+1. For a Single Master deployment, you would configure each node of the cluster to use SSL as described in the [Secure Sockets (SSL)] section. The nodes will then use SSL for both external and intra-machine communication.
+
+2. For a Multiple Masters deployment, you would configure SSL within the external routing layer (e.g. the Nginx server in the example above) and use standard unencrypted HTTP for the individual nodes. You can optionally configure the RStudio nodes to use SSL as well, but this is not strictly required if all communication with outside networks is done via the external routing layer.
+
+
+## Balancing Methods
+
+There are four methods available for balancing R sessions across a cluster. The most appropriate method is installation specific and depends on the number of users and type of workloads they create.
+
+### Sessions
+
+The default balancing method is `sessions`, which attempts to evenly distribute R sessions across the nodes of the cluster:
+
+```ini
+[config]
+balancer = sessions
+```
+
+This method allocates new R sessions to the node with the least number of active R sessions. This is a good choice if you expect that users will for the most part have similar resource requirements.
+
+### System Load
+
+The `system-load` balancing method distributes sessions based on the active workload of available nodes:
+
+```ini
+[config]
+balancer = system-load
+```
+
+The metric used to establish active workload is the 5-minute [load average](http://en.wikipedia.org/wiki/Load_\(computing\)). This is a good choice if you expect widely disparate CPU workloads and want to ensure that machines with high CPU utilization don't receive new sessions.
+
+### User Hash
+
+The `user-hash` balancing method attempts to distribute load evenly and consistently across nodes by hashing the username of clients:
+
+```ini
+[config]
+balancer = user-hash
+```
+
+The hashing algorithm used is [CityHash](http://en.wikipedia.org/wiki/CityHash), which will produce a relatively even distribution of users to nodes. This is a good choice if you want the assignment of users/sessions to nodes to be stable.
+
+### Custom
+
+The `custom` balancing method calls out to external script to make load balancing decisions:
+
+```ini
+[config]
+balancer = custom
+```
+
+When `custom` is specified, RStudio Server will execute the following script when it needs to make a choice about which node to start a new session on:
+
+```bash
+/usr/lib/rstudio-server/bin/rserver-balancer
+```
+
+This script will be passed two environment variables:
+
+`RSTUDIO_USERNAME` --- The user on behalf or which the new R session is being created.
+
+`RSTUDIO_NODES` --- Comma separated list of the IP address and port of available nodes.
+
+The script should return the node to start the new session on using it's standard output. Note that the format of the returned node should be identical to it's format as passed to the script (i.e. include the IP address and port).
+
+
+
+
