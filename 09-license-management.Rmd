@@ -1,0 +1,83 @@
+# License Management
+
+## Product Activation
+
+### Activation Basics
+
+When RStudio Server is first installed on a system it operates in evaluation mode for a period of time and then subsequently requires activation for continued use. To determine the current license status of your system you can use the following command:
+
+```bash
+$ sudo rstudio-server license-manager status
+```
+
+After purchasing a license to RStudio Server you'll receive a product key that can be used to activate the license on a given system. You can perform the activation as follows:
+
+```bash
+$ sudo rstudio-server license-manager activate <product-key>
+$ sudo rstudio-server restart
+```
+
+Note that you need to restart the server in order for licensing changes to take effect.
+
+If you want to move your license of RStudio Server to another system you should first deactivate it on the system you are moving from. For example:
+
+```bash
+$ sudo rstudio-server license-manager deactivate
+```
+
+## Connectivity Requirements
+
+In order to activate or deactivate RStudio Server internet connectivity is required for communication with the licensing server. If your server is behind an internet proxy or not connected to the internet at all this section describes what's required to successfully activate.
+
+### Proxy Servers
+
+If your server is behind an internet proxy you may need to add an additional command line flag indicating the address and credentials required to communicate through the proxy. Note however that this may not be necessary if either the `http_proxy` or `all_proxy` environment variable  is defined (these are read and used by RStudio Server when available).
+
+If you do need to specify a proxy server explicitly you can do so using the `--proxy` command line parameter. For example:
+
+```bash
+$ sudo rstudio-server license-manager --proxy=http://127.0.0.1/ activate <product-key>
+```
+
+Proxy settings can include a host-name, port, and username/password if necessary. The following are all valid proxy configurations:
+
+```bash
+http://127.0.0.1/
+http://127.0.0.1:8080/
+http://user:pass@127.0.0.1:8080/
+```
+ 
+If the port is not specified, the license manager will default to using port 1080.
+
+
+### Offline Activation
+
+If your system has no connection to the internet it's also possible to perform an offline activation. To do this, you first generate an offline activation request as follows:
+
+```bash
+$ sudo rstudio-server license-manager activate-offline-request <product-key>
+```
+
+Executing this command will print an offline activation request to the terminal which you should copy and paste and then send to RStudio customer support ([support@rstudio.com](support@rstudio.com)). You will receive a reply with a file attachment that can be used to activate offline as follows:
+
+
+```bash
+$ sudo rstudio-server license-manager activate-offline <activation-file>
+$ sudo rstudio-server restart
+```
+
+Note that you need to restart the server in order for licensing changes to take effect.
+
+If you want to move your license of RStudio Server to another system you can also perform license deactivation offline. You can do this as follows:
+
+```bash
+$ sudo rstudio-server license-manager deactivate-offline
+```
+
+Executing this command will print an offline deactivation request to the terminal which you should copy and paste and then send to RStudio customer support ([support@rstudio.com](support@rstudio.com)).
+
+You can also perform an offline check of your current license status using the following command:
+
+```bash
+$ sudo rstudio-server license-manager status-offline
+```

@@ -1,0 +1,207 @@
+# Auditing and Monitoring
+
+## Auditing Configuration
+
+### R Console Auditing
+
+RStudio Server can be optionally configured to audit all R console activity by writing console input and output to a central location (the `/var/lib/rstudio-server/audit/r-console` directory by default). This feature can be enabled using the `audit-r-console` setting. For example:
+
+*/etc/rstudio/rserver.conf*
+
+```ini
+audit-r-console=input
+```
+
+This will audit all R console *input*. If you wish to record both console input and output then you can use the `all` setting. For example:
+
+*/etc/rstudio/rserver.conf*
+
+```ini
+audit-r-console=all
+```
+
+Note that if you choose to record both input and output you'll need considerably more storage available than if you record input only. See the [Storage Options] section below for additional discussion of storage requirements and configuration.
+
+### Data Format
+
+The R console activity for each user is written into individual files within the `r-console` data directory (by default `/var/lib/rstudio-server/audit/r-console`). The following fields are included:
+
+|       |      | 
+|:--------------------|:--------------------------------------------------|
+| session_id    | Unique identifier for R session where this action occurred. |
+| project   | Path to RStudio project directory if the action occurred within a project.  |
+| pid    |  Unix process ID where this console action occurred.  |
+| username    | Unix user which executed this console action. |
+| timestamp   | Timestamp of action in milliseconds since the epoch.  |
+| type    | Console action type (prompt, input, output, or error).    |
+| data    | Console data associated with this action (e.g. output text).  |
+
+The `session_id` field refers to a concurrent R session as described in the section on [Multiple R Sessions] (i.e. it can span multiple projects and/or pids).
+
+The default format for the log file is CSV (Comma Separated Values). It's also possible to write the data to [Newline Delimited JSON](http://ndjson.org/) by using the `audit-r-console-format` option. For example:
+
+```ini
+audit-r-console-format=json
+```
+
+Note that when using the JSON format the entire file is not a valid JSON object but rather each individual line is one. This follows the Newline Delimited JSON specification supported by several libraries including the R **jsonlite** package.
+
+### Storage Options
+
+You can customize both the location where audit data is written as well as the maximum amount of data to log per-user (by default this is 50 MB). To specify the root directory for audit data you use the `audit-data-path` setting. For example:
+
+*/etc/rstudio/rserver.conf*
+
+```ini
+audit-data-path=/audit-data
+```
+
+To specify the maximum amount of data to write to an individual user's R console log file you use the `audit-r-console-user-limit-mb` setting. For example:
+
+*/etc/rstudio/rserver.conf*
+
+```ini
+audit-r-console-user-limit-mb=100
+```
+
+The default maximum R console log file size is 50 megabytes per-user. To configure no limit to the size of files which can be written you set the value to `0`, for example:
+
+*/etc/rstudio/rserver.conf*
+
+```ini
+audit-r-console-user-limit-mb=0
+```
+
+Note that there is no automatic rotation of the audit log files as they get larger. Depending on the number of users and their activity level this means that you should either create a scheduled (e.g. cron) job to periodically move the files off the server onto auxiliary storage and/or ensure that the volume they are stored on has sufficient capacity. 
+
+## Monitoring Configuration
+
+### System and Per-User Resources
+
+RStudio Server monitors the use of resources (CPU, memory, etc.) on both a per-user and system wide basis. By default, monitoring data is written to a set of RRD ([http://oss.oetiker.ch/rrdtool/](http://oss.oetiker.ch/rrdtool/)) files and can be viewed using the [Administrative Dashboard]. 
+
+The storage of system monitoring data requires about 20MB of disk space and the storage of user monitoring data requires about 3.5MB per user. This data is stored by default at `/var/lib/rstudio-server/monitor`. If you have a large number of users you may wish to specify an alternate volume for monitoring data. You can do this using the `monitor-data-path` setting. For example:
+
+*/etc/rstudio/rserver.conf*
+
+```ini
+monitor-data-path=/monitor-data
+```
+
+You also might wish to disable monitoring with RRD entirely. You can do this using the `monitor-rrd-enabled` setting. For example:
+
+*/etc/rstudio/rserver.conf*
+
+```ini
+monitor-rrd-enabled=0
+```
+
+Note that changes to the configuration will not take effect until the server is restarted. 
+
+### Using Graphite
+
+If you are managing several servers it might be convenient to send server monitoring data to a centralized database and graphing facility as opposed to local RRD files. You can do this by configuring the server to send monitoring data to [Graphite](http://graphite.wikidot.com/) (or any other engine compatible with the Carbon protocol). This can be done in addition to or entirely in place of RRD.
+
+There are four settings that control interaction with Graphite:
+
+|                    |                                                            |
+|--------------------|--------------------------------------------------|
+| **monitor-graphite-enabled**    | Write monitoring data to Graphite (defaults to `0`) |
+| **monitor-graphite-host**       | Host running Graphite (defaults to `127.0.0.1`) |
+| **monitor-graphite-port**       | Port Graphite is listening on (defaults to `2003`) |
+| **monitor-graphite-client-id**  | Optional client ID for sender |
+
+For example, to enable Graphite monitoring on a remote host with the default Graphite port you would use these settings:
+
+*/etc/rstudio/rserver.conf*
+
+```ini
+monitor-graphite-enabled=1
+monitor-graphite-host=134.47.22.6
+```
+
+If you are using a service like hostedgraphite.com that requires that you provide an API key as part of reporting metrics you can use the `monitor-graphite-client-id` setting. For example:
+
+*/etc/rstudio/rserver.conf*
+
+```ini
+monitor-graphite-enabled=1
+monitor-graphite-host=carbon.hostedgraphite.com
+monitor-graphite-client-id=490662a4-1d8c-11e5-b06d-000c298f3d04
+```
+
+Note that changes to the configuration will not take effect until the server is restarted. 
+
+## Server Health Checks
+
+### Enabling Health Checks
+
+You may wish to periodically poll RStudio Server to ensure that it's still responding to requests as well as to examine various indicators of server load. You can enable a health check endpoint using the `server-health-check-enabled` setting. For example:
+
+*/etc/rstudio/rserver.conf*
+
+```ini
+server-health-check-enabled=1
+```
+
+After restarting the server, the following health-check endpoint will be available:
+
+```html
+http://<server-address-and-port>/health-check
+```
+
+By default, the output of the health check will appear as follows:
+
+```coldfusion
+active-sessions: 1
+cpu-percent: 0.0
+memory-percent: 64.2
+swap-percent: 0.0
+load-average: 4.1
+```
+
+\newpage
+
+### Customizing Responses 
+
+The response to the health check is determined by processing a template that includes several variables. The default template is:
+
+```coldfusion
+active-sessions: #active-sessions#
+cpu-percent: #cpu-percent#
+memory-percent: #memory-percent#
+swap-percent: #swap-percent#
+load-average: #load-average#
+```
+
+You can customize this template to return an alternate format (e.g. XML or JSON) that is parse-able by an external monitoring system. To do this you simply create a template and copy it to **`/etc/rstudio/health-check`** For example:
+
+*/etc/rstudio/health-check*
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<health-check>
+  <active-sessions>#active-sessions#</active-sessions>
+  <cpu-percent>#cpu-percent#</cpu-percent>
+  <memory-percent>#memory-percent#</memory-percent>
+  <swap-percent>#swap-percent#</swap-percent>
+  <load-average>#load-average#</load-average>
+</health-check>
+```
+
+### Changing the URL
+
+It's also possible to customize the URL used for health checks. RStudio Server will use the first file whose name begins with `health-check` in the `/etc/rstudio` directory as the template, and require that the full file name be specified in the URL. For example, a health check template located at the following path:
+
+```bash
+/etc/rstudio/health-check-B64C900E
+```
+
+Would be accessed using this URL:
+
+```html
+http://<server-address-and-port>/health-check-B64C900E
+```
+
+Note that changes to the health check template will not take effect until the server is restarted.
+
