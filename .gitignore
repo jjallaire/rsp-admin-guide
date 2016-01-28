@@ -5,3 +5,5 @@
 *.html
 libs/
 search_index.json
+_main.pdf
+_main.tex
