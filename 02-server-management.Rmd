@@ -1,0 +1,193 @@
+# Server Management
+
+## Core Administrative Tasks
+
+### Configuration Files
+
+RStudio Server uses several configuration files all located within the `/etc/rstudio` directory. Configuration files include:
+
+|                      |                                                    |
+| -------------------- | -------------------------------------------------- |
+| rserver.conf         | Core server settings |
+| rsession.conf        | Settings related to individual R sessions |
+| profiles             | User and group resource limits |
+| r-versions           | Manual specification of additional versions of R |
+| ip-rules             | IP access rules (allow or deny groups of IP addresses) |
+| load-balancer        | Load balancing configuration |
+| health-check         | Template for content to return for server health checks |
+| google-accounts      | Mappings from Google accounts to local accounts |
+
+
+The `rserver.conf` and `rsession.conf` files are created by default during installation however the other config files are optional so need to be created explicitly.
+
+Whenever making changes to configuration files you need to restart the server for them to take effect. You can do this using the `restart` command of the server management utility:
+
+```bash
+$ sudo rstudio-server restart
+```
+
+### Stopping and Starting
+
+During installation RStudio Server is automatically registered as a daemon which starts along with the rest of the system. On Debian, Ubuntu, and RedHat/CentOS 6 this registration is performed using an Upstart script at `/etc/init/rstudio-server.conf`. On other systems including RedHat/CentOS 5 an init.d script is installed at `/etc/init.d/rstudio-server.`
+
+To manually stop, start, and restart the server you use the following commands:
+
+```bash
+$ sudo rstudio-server stop
+$ sudo rstudio-server start
+$ sudo rstudio-server restart
+```
+
+To check the current stopped/started status of the server:
+
+```bash
+$ sudo rstudio-server status
+```
+
+###  Managing Active Sessions
+
+There are a number of administrative commands which allow you to see what sessions are active and request suspension of running sessions.
+
+To list all currently active sessions:
+
+```bash
+$ sudo rstudio-server active-sessions
+```
+
+#### Suspending Sessions
+
+When R sessions have been idle (no processing or user interaction) for a specified period of time (2 hours by default) RStudio Server suspends them to disk to free up server resources. When the user next interacts with their session it is restored from disk and the user resumes right back where they left off. This is all done seamlessly such that users aren't typically aware that a suspend and resume has occurred.
+
+To manually suspend an individual session:
+
+```bash
+$ sudo rstudio-server suspend-session <pid>
+```
+
+To manually suspend all running sessions:
+
+```bash
+$ sudo rstudio-server suspend-all
+```
+
+The suspend commands also have a "force" variation which will send an interrupt to the session to request the termination of any running R command:
+
+```bash
+$ sudo rstudio-server force-suspend-session <pid>
+$ sudo rstudio-server force-suspend-all
+```
+
+The `force-suspend-all` command should be issued immediately prior to any reboot so as to preserve the data and state of active R sessions across the restart.
+
+#### Killing Sessions
+
+If you are for any reason unable to cooperatively suspend an R session using the commands described above you may need to force kill the session. Force killing a session results in SIGKILL being sent to the process, causing an immediate termination.
+
+To force kill an individual session:
+
+```bash
+$ sudo rstudio-server kill-session <pid>
+```
+
+To force kill all running sessions:
+
+```bash
+$ sudo rstudio-server kill-all
+```
+
+Note that these commands should be exclusively reserved for situations where suspending doesn't work as force killing a session can cause user data loss (e.g. unsaved source files or R workspace content). 
+
+### Taking the Server Offline
+
+If you need to perform system maintenance and want users to receive a friendly message indicating the server is offline you can issue the following command:
+
+```bash
+$ sudo rstudio-server offline
+```
+
+When the server is once again available you should issue this command:
+
+```bash
+$ sudo rstudio-server online
+```
+
+### Upgrading to a New Version
+
+If you perform an upgrade of RStudio Server and an existing version of the server is currently running, then the upgrade process will also ensure that active sessions are immediately migrated to the new version. This includes the following behavior:
+
+- Running R sessions are suspended so that future interactions with the server automatically launch the updated R session binary
+- Currently connected browser clients are notified that a new version is available and automatically refresh themselves.
+- The core server binary is restarted
+ 
+
+To upgrade to a new version of RStudio Server you simply install the new version. For example on Debian/Ubuntu:
+
+```bash
+$ sudo gdebi <rstudio-server-package.deb>
+```
+
+For RedHat/CentOS:
+
+```bash
+$ sudo yum install --nogpgcheck <rstudio-server-package.rpm>
+```
+
+For openSUSE / SLES:
+
+```bash
+$ sudo zypper install <rstudio-server-package.rpm>
+```
+
+## Administrative Dashboard
+
+RStudio Server includes an administrative dashboard with the following features:
+
+1) Monitoring of active sessions and their CPU and memory utilization;
+2) The ability to suspend, forcibly terminate, or assume control of any active session;
+3) Historical usage data for individual server users (session time, memory, CPU, logs);
+4) Historical server statistics (CPU, memory, active sessions, system load); and
+5) Searchable server log (view all messages or just those for individual users)
+
+The dashboard can be an invaluable tool in understanding server usage and capacity as well as to diagnose and resolve problems.
+
+### Enabling the Dashboard
+
+The administrative dashboard is accessed at the following URL:
+
+```html
+http://<server-address>/admin
+````
+
+The administrative dashboard is disabled by default. To enable it you set the `admin-enabled` option. You can also specify that only users of certain group have access to the dashboard using the `admin-group` option. For example:
+
+*/etc/rstudio/rserver.conf*
+
+```ini
+admin-enabled=1
+admin-group=rstudio-admins
+```
+
+Note that changes to the configuration will not take effect until the server is restarted. 
+
+### Administrator Superusers
+
+You can further designate a certain user or group of users as administrative "superusers". Superusers have the following additional privileges:
+
+1) Suspend or terminate active sessions
+2) Assume control of active sessions (e.g. for troubleshooting)
+3) Login to RStudio as any other server user
+
+Administrative superusers do not have root privilege on the system, but rather have a narrow set of delegated privileges that are useful in managing and supporting the server. You can define the users with this privilege using the `admin-superuser-group` setting. For example:
+
+*/etc/rstudio/rserver.conf*
+
+```ini
+admin-superuser-group=rstudio-superuser-admins
+```
+Changes to the configuration will not take effect until the server is restarted. 
+
+#### Google Accounts Restrictions
+
+Note that the ability to login as other users and assume control of existing sessions is not available if you are authenticating with [Google Accounts]. This is because Google authentication uses a different user-identity mechanism which isn't compatible with the way that user session impersonation is implemented.
+
+
