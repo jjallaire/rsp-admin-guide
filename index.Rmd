@@ -2,7 +2,7 @@
 title: "RStudio Server Professional Edition"
 subtitle: "Administation Guide"
 date: "`r Sys.Date()`"
-knit: "bookdown::render_book"
+knit: bookdown::render_book
 output:
   bookdown::gitbook: default
   bookdown::pdf_book:
