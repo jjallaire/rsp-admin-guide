@@ -2,8 +2,4 @@
 .Rhistory
 .RData
 .DS_Store
-*.html
-libs/
-search_index.json
-_main.pdf
-_main.tex
+_book

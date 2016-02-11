@@ -4,7 +4,8 @@ subtitle: "Administation Guide"
 date: "`r Sys.Date()`"
 knit: bookdown::render_book
 output:
-  bookdown::gitbook: default
+  bookdown::gitbook: 
+    use_rmd_names: yes
   bookdown::pdf_book:
     includes:
       in_header: preamble.tex

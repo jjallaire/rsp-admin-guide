@@ -1,12 +1,9 @@
 RMD_FILES := $(filter-out _%, $(wildcard *.Rmd))
-HTML_FILES := $(patsubst %.Rmd, %.html, $(RMD_FILES))
 
-all: $(HTML_FILES)
+all: html pdf
 
-%.html: %.Rmd
-	Rscript -e "bookdown::render_book('$<', 'bookdown::gitbook')"
+html: $(RMD_FILES)
+	Rscript -e "bookdown::render_book('index.Rmd', 'bookdown::gitbook')"
 
-pdf: book.pdf
-
-%.pdf: %.Rmd $(RMD_FILES)
-	Rscript -e "bookdown::render_book('$<', 'bookdown::pdf_book')"
+pdf: $(RMD_FILES)
+	Rscript -e "bookdown::render_book('index.Rmd', 'bookdown::pdf_book')"
