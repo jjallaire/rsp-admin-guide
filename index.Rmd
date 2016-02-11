@@ -9,7 +9,7 @@ output:
   bookdown::pdf_book:
     includes:
       in_header: preamble.tex
-    keep_tex: yes
+    keep_tex: no
     latex_engine: xelatex
 documentclass: book
 ---
