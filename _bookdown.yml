@@ -1,9 +1,3 @@
 book_filename: rstudio-server-professional-admin-guide
 repo: https://github.com/rstudio/bookdown/
-edit:
-  link: https://github.com/jjallaire/rsp-admin-guide/edit/master/%s
-  text: "Edit"
-download: [pdf]
-gitbook_toc_before: |
-  <li><a href="./">RStudio Server Professional</a></li>
 output_dir: _book

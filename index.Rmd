@@ -6,6 +6,15 @@ knit: bookdown::render_book
 output:
   bookdown::gitbook: 
     use_rmd_names: yes
+    config:
+      edit:
+        link: https://github.com/jjallaire/rsp-admin-guide/edit/master/%s
+        text: "Edit"
+      download: ["pdf"]
+      toc:
+        collapse: yes
+        before: |
+          <li><a href="./">RStudio Server Professional</a></li>
   bookdown::pdf_book:
     includes:
       in_header: preamble.tex
