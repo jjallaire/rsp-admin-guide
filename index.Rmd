@@ -18,9 +18,16 @@ output:
   bookdown::pdf_book:
     includes:
       in_header: preamble.tex
+      before_body: cover.tex
     keep_tex: no
     latex_engine: xelatex
+    pandoc_args: [
+      "--variable", "title="
+    ]
 documentclass: book
+classoption: oneside
+geometry: margin=1in
+fontsize: 11pt
 ---
 
 # Getting Started
