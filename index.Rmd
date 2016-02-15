@@ -11,8 +11,11 @@ output:
         link: https://github.com/jjallaire/rsp-admin-guide/edit/master/%s
         text: "Edit"
       download: ["pdf"]
+      toolbar:
+        position: fixed
       toc:
         collapse: yes
+        scroll_highlight: yes
         before: |
           <li><a href="./">RStudio Server Professional</a></li>
   bookdown::pdf_book:
