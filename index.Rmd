@@ -5,7 +5,7 @@ date: "`r Sys.Date()`"
 knit: bookdown::render_book
 output:
   bookdown::gitbook: 
-    use_rmd_names: yes
+    html_names: "chapter"
     config:
       edit:
         link: https://github.com/jjallaire/rsp-admin-guide/edit/master/%s
