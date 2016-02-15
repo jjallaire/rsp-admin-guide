@@ -16,8 +16,6 @@ output:
       toc:
         collapse: yes
         scroll_highlight: yes
-        before: |
-          <li><a href="./">RStudio Server Professional</a></li>
   bookdown::pdf_book:
     includes:
       in_header: preamble.tex
