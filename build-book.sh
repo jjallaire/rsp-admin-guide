@@ -20,3 +20,9 @@ pdf <- list.files(path = '_book',
                   full.names = TRUE)
 file.copy(pdf, ".")
 
+# build zipfile for transfer
+book_files <- list.files('_book', recursive = TRUE, full.names = TRUE)
+zip('rstudio-server-pro-admin-guide.zip', book_files)
+
+
+
