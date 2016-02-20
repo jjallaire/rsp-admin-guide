@@ -14,12 +14,6 @@ unlink('_book', recursive = TRUE)
 bookdown::render_book('index.Rmd', 'bookdown::gitbook')
 bookdown::render_book('index.Rmd', 'bookdown::pdf_book')
 
-# copy pdf to root directory
-pdf <- list.files(path = '_book',
-                  pattern = glob2rx("rstudio-server-pro-*.pdf"),
-                  full.names = TRUE)
-file.copy(pdf, ".")
-
 # build zipfile for transfer
 book_files <- list.files('_book', recursive = TRUE, full.names = TRUE)
 zip('rstudio-server-pro-admin-guide.zip', book_files)
