@@ -1,0 +1,3 @@
+book_filename: rstudio-server-pro-${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}-admin-guide
+repo: https://github.com/jjallaire/rsp-admin-guide/
+output_dir: _book

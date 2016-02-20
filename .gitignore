@@ -3,3 +3,9 @@
 .RData
 .DS_Store
 _book
+CMake*
+Makefile
+_bookdown.yml
+cover.tex
+cmake_install.cmake
+rstudio-server-pro-*-admin-guide.*
