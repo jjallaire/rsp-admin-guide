@@ -20,6 +20,8 @@ output:
     pandoc_args: [
       "--variable", "title="
     ]
+  bookdown::epub_book:
+    toc_depth: 2
 documentclass: book
 classoption: oneside
 geometry: margin=1in
