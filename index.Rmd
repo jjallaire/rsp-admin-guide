@@ -5,12 +5,11 @@ date: "`r Sys.Date()`"
 knit: bookdown::render_book
 output:
   bookdown::gitbook: 
-    split_by: "chapter"
     config:
       edit:
         link: https://github.com/jjallaire/rsp-admin-guide/edit/master/%s
       toc:
-        collapse: yes
+        collapse: section
   bookdown::pdf_book:
     includes:
       in_header: preamble.tex
